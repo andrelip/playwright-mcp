@@ -23,6 +23,22 @@ import { ManualPromise } from './manualPromise';
 import type { ImageContent, TextContent } from '@modelcontextprotocol/sdk/types';
 import type { ModalState, Tool, ToolActionResult } from './tools/tool';
 
+// Logged network request entry
+type LoggedRequest = {
+  id: number;
+  request: playwright.Request;
+  response: playwright.Response | null;
+  failureText?: string;
+  status: 'pending' | 'finished' | 'failed';
+  url: string;
+  method: string;
+  domain: string;
+  type: string;
+  initiator: string;
+  requestHeaders: Record<string, string>;
+  requestPostData?: string;
+};
+
 export type ContextOptions = {
   browserName?: 'chromium' | 'firefox' | 'webkit';
   userDataDir: string;
@@ -45,6 +61,9 @@ export class Context {
   private _tabs: Tab[] = [];
   private _currentTab: Tab | undefined;
   private _modalStates: (ModalState & { tab: Tab })[] = [];
+  public _loggingEnabled: boolean = false;
+  public _requestLog: LoggedRequest[] = [];
+  public _nextRequestId: number = 1;
   private _pendingAction: PendingAction | undefined;
 
   constructor(tools: Tool[], options: ContextOptions) {
@@ -243,6 +262,10 @@ ${code.join('\n')}
     this._tabs.push(tab);
     if (!this._currentTab)
       this._currentTab = tab;
+    // Attach network request logging if enabled
+    page.on('request', request => this._onRequest(request));
+    page.on('response', response => this._onResponse(response));
+    page.on('requestfailed', request => this._onRequestFailed(request));
   }
 
   private _onPageClosed(tab: Tab) {
@@ -256,6 +279,49 @@ ${code.join('\n')}
       this._currentTab = this._tabs[Math.min(index, this._tabs.length - 1)];
     if (this._browserContext && !this._tabs.length)
       void this.close();
+  }
+  
+  // Internal: handle network request start
+  private _onRequest(request: playwright.Request) {
+    if (!this._loggingEnabled) return;
+    const id = this._nextRequestId++;
+    const url = request.url();
+    let domain = '';
+    try { domain = new URL(url).hostname; } catch { domain = url; }
+    const entry: LoggedRequest = {
+      id,
+      request,
+      response: null,
+      failureText: undefined,
+      status: 'pending',
+      url,
+      method: request.method(),
+      domain,
+      type: request.resourceType(),
+      initiator: request.frame()?.url() || '',
+      requestHeaders: request.headers(),
+      requestPostData: request.postData() || undefined,
+    };
+    this._requestLog.push(entry);
+  }
+
+  // Internal: handle network response success
+  private _onResponse(response: playwright.Response) {
+    if (!this._loggingEnabled) return;
+    const req = response.request();
+    const entry = this._requestLog.find(e => e.request === req);
+    if (!entry) return;
+    entry.status = 'finished';
+    entry.response = response;
+  }
+
+  // Internal: handle network request failure
+  private _onRequestFailed(request: playwright.Request) {
+    if (!this._loggingEnabled) return;
+    const entry = this._requestLog.find(e => e.request === request);
+    if (!entry) return;
+    entry.status = 'failed';
+    entry.failureText = request.failure()?.errorText;
   }
 
   async close() {

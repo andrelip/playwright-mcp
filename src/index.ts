@@ -31,6 +31,7 @@ import snapshot from './tools/snapshot';
 import tabs from './tools/tabs';
 import screen from './tools/screen';
 import evaluate from './tools/evaluate';
+import requests from './tools/requests';
 
 import type { Tool, ToolCapability } from './tools/tool';
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -48,6 +49,7 @@ const snapshotTools: Tool[] = [
   ...snapshot,
   ...tabs(true),
   ...evaluate,
+  ...requests,
 ];
 
 const screenshotTools: Tool[] = [
@@ -62,6 +64,7 @@ const screenshotTools: Tool[] = [
   ...screen,
   ...tabs(false),
   ...evaluate,
+  ...requests,
 ];
 
 type Options = {
