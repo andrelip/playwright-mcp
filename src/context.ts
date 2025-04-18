@@ -186,9 +186,13 @@ ${code.join('\n')}
 
     const content = actionResult?.content ?? [];
 
+    // Uncle Bob/Steve Jobs clarity: If tool returns content, show only that. Otherwise, show generic info.
+    if (content.length > 0) {
+      return { content };
+    }
+
     return {
       content: [
-        ...content,
         {
           type: 'text',
           text: result.join('\n'),
