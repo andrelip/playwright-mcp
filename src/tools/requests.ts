@@ -33,6 +33,11 @@ const listRequestsSchema = z.object({
 });
 const readRequestSchema = z.object({ id: z.number().describe('Identifier of the logged request') });
 const clearRequestsSchema = z.object({});
+const searchRequestsSchema = z.object({
+  pattern: z.string().describe('String to search for'),
+  type: z.string().optional().describe('Filter by resource type'),
+  lines: z.number().optional().describe('Number of context lines around each match'),
+});
 
 // Start logging tool
 const startLoggingTool: Tool = {
@@ -156,5 +161,59 @@ const clearRequestsTool: Tool = {
   },
 };
 
+// Search content tool
+const searchRequestsTool: Tool = {
+  capability: 'core',
+  schema: {
+    name: 'browser_network_search_requests',
+    description: 'Search response bodies of logged network requests for a given string. Allows filtering by resource type and number of context lines. Returns up to 20 entries; if more matches exist, the output is truncated and a warning is included. Each entry contains the request id, file name, and snippet.',
+    inputSchema: zodToJsonSchema(searchRequestsSchema),
+  },
+  handle: async (context: Context, params) => {
+    const { pattern, type, lines } = searchRequestsSchema.parse(params);
+    const results: { id: number; fileName: string; snippet: string }[] = [];
+    for (const entry of context._requestLog) {
+      if (entry.status !== 'finished' || !entry.response)
+        continue;
+      if (type && entry.type !== type)
+        continue;
+      let body: string;
+      try { body = await entry.response.text(); } catch { continue; }
+      const fileName = (() => {
+        try {
+          const parsed = new URL(entry.url);
+          const segments = parsed.pathname.split('/');
+          const name = segments.pop() || '';
+          return name || entry.url;
+        } catch {
+          return entry.url;
+        }
+      })();
+      const linesArray = body.split(/\r?\n/);
+      const contextLines = lines ?? 0;
+      for (let i = 0; i < linesArray.length; ++i) {
+        if (linesArray[i].includes(pattern)) {
+          const start = Math.max(0, i - contextLines);
+          const end = Math.min(linesArray.length - 1, i + contextLines);
+          const snippet = linesArray.slice(start, end + 1).join('\n');
+          results.push({ id: entry.id, fileName, snippet });
+        }
+      }
+    }
+    // Limit output to a maximum number of entries and include warning if truncated
+    const maxResults = 20;
+    const totalMatches = results.length;
+    const limitedResults = totalMatches > maxResults ? results.slice(0, maxResults) : results;
+    const output: Record<string, any> = { results: limitedResults };
+    if (totalMatches > maxResults)
+      output.warning = `Results truncated to ${maxResults} entries (total matches: ${totalMatches})`;
+    return {
+      code: [],
+      captureSnapshot: false,
+      waitForNetwork: false,
+      resultOverride: { content: [{ type: 'text', text: JSON.stringify(output, null, 2) }] },
+    };
+  },
+};
 // Export all request tools
-export default [startLoggingTool, listRequestsTool, readRequestTool, clearRequestsTool];
+export default [startLoggingTool, listRequestsTool, readRequestTool, clearRequestsTool, searchRequestsTool];
