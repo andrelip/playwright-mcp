@@ -32,10 +32,14 @@ const evaluate: Tool = {
   handle: async (context, params) => {
     const validatedParams = evaluateSchema.parse(params);
     const tab = context.currentTabOrDie();
+    // Execute the script and capture the result
     const result = await tab.page.evaluate(validatedParams.script);
     return {
       code: [`// Evaluate JavaScript: ${validatedParams.script}`],
-      content: [{ type: 'text', text: String(result) }],
+      // Return the evaluation result as action content
+      action: async () => ({
+        content: [{ type: 'text', text: String(result) }]
+      }),
       captureSnapshot: false,
       waitForNetwork: false,
     };
